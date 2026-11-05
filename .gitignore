@@ -1,0 +1,13 @@
+__pycache__/
+.venv/
+.wheels/
+.build/
+.ipynb_checkpoints/
+.DS_Store
+.vscode/
+.idea/
+raw/
+outputs/data/
+itbot_results.zip
+*.part
+runs/
