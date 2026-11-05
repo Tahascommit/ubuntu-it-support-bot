@@ -34,7 +34,7 @@ Everything is in one notebook that follows the course ML submission template:
 | Ask Ubuntu after the dump (Apr 2024 - Nov 2026) | Stack Exchange API | 2,000 top questions with answers, monthly counts | CC BY-SA |
 | Off-topic questions | Stack Exchange API, 12 non-IT sites | 1,200 titles | CC BY-SA |
 | Refined answers | `scripts/refine_answers.py`: Qwen3-4B-Instruct rewrites trusted answers, keeping their commands | 3,329 kept of 4,000 | derived from CC BY-SA answers |
-| Official Ubuntu guides | web scraping, 1 page per second as robots.txt asks | 2,959 passages from 383 pages | Desktop guide CC BY-SA 4.0; the Server guide states no licence, so every passage keeps its source link |
+| Official Ubuntu guides | web scraping, 1 page per second as robots.txt asks | 2,959 passages from 347 pages (383 fetched) | Desktop guide CC BY-SA 4.0; the Server guide states no licence, so every passage keeps its source link |
 
 Cleaning keeps one trusted answer per question: the accepted answer if the community did not vote it down, otherwise the best answer with at least two up-votes. HTML is converted to text with code blocks kept, and e-mails, user names in paths and prompts, and @mentions are removed.
 
