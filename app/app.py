@@ -49,14 +49,25 @@ def sources_md(rows, sim, min_sim):
     return "\n".join(lines)
 
 
+def as_text(content):
+    """A message's content as plain text. Gradio 6 returns earlier messages as a list of parts ({"type": "text", ...})."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        return str(content.get("text") or "")
+    if isinstance(content, (list, tuple)):
+        return "\n".join(as_text(part) for part in content).strip()
+    return "" if content is None else str(content)
+
+
 def to_pairs(history):
     """Gradio message list -> [(user, assistant), ...]"""
     pairs, user = [], None
     for m in history:
         if m["role"] == "user":
-            user = m["content"]
+            user = as_text(m["content"])
         elif m["role"] == "assistant" and user is not None:
-            pairs.append((user, m["content"]))
+            pairs.append((user, as_text(m["content"])))
             user = None
     return pairs
 
