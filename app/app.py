@@ -2,6 +2,7 @@
 # On a laptop, from the project folder:   python app/app.py          (opens http://127.0.0.1:7860)
 # In the Colab notebook:                  chat_app.build_demo(bot).launch(share=True)
 import argparse
+import contextlib
 import json
 import re
 import sys
@@ -137,15 +138,30 @@ def build_demo(bot, card=None):
             yield history, OFF_TOPIC, ""
 
     def compare(message):
+        """Stream the pre-trained model's answer (left), then the fine-tuned bot's (right)."""
         if not message.strip():
-            return "", "", ""
-        if hasattr(bot.model, "disable_adapter"):
-            with bot.model.disable_adapter():
-                base, _, _ = bot.respond(message, use_library=False)
-        else:
-            base, _, _ = bot.respond(message, use_library=False)
-        tuned, rows, sim = bot.respond(message)
-        return base, tuned, OFF_TOPIC if itbot.is_refusal(tuned) else sources_md(rows, sim, bot.min_sim)
+            yield "", "", ""
+            return
+        base = ""
+        off = getattr(bot.model, "disable_adapter", None)
+        with (off() if off else contextlib.nullcontext()):        # adapter off = the model before fine-tuning
+            streamer, _, _, stopper = stream_answer(bot, message, use_library=False, max_new_tokens=300)
+            for piece in streamer:
+                base += piece
+                yield base, "", ""
+        if stopper.fired:
+            base = trim_repeats(base) + "\n\n*(stopped here: the model started repeating itself)*"
+            yield base, "", ""
+        tuned = ""
+        streamer, rows, sim, stopper = stream_answer(bot, message, use_library=True)
+        for piece in streamer:
+            tuned += piece
+            yield base, tuned, ""
+        if stopper.fired:
+            tuned = trim_repeats(tuned)
+        src = ("_The fine-tuned bot declined: the question is outside Ubuntu and Linux support, so no sources are shown._"
+               if itbot.is_refusal(tuned) else sources_md(rows, sim, bot.min_sim))
+        yield base, tuned, src
 
     about = ("An IT support assistant for Ubuntu and Linux, built for an industry LLM capstone. "
              "It is the pre-trained **Qwen3-1.7B-Base fine-tuned with LoRA** on trusted Ask Ubuntu answers (rewritten into clear "
