@@ -3,7 +3,9 @@
 # In the Colab notebook:                  chat_app.build_demo(bot).launch(share=True)
 import argparse
 import json
+import re
 import sys
+import threading
 from pathlib import Path
 
 import gradio as gr
@@ -60,6 +62,49 @@ def as_text(content):
     return "" if content is None else str(content)
 
 
+def stream_answer(bot, message, use_library=True, max_new_tokens=450):
+    """Answer one question on its own, as the model was trained and tested: the earlier turns of the chat are shown
+    on screen but not sent to the model. Streams the text; stops early if the model starts repeating itself."""
+    import torch
+    from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer
+
+    prompt, rows, sim = bot.prompt(message, None, use_library)
+    enc = bot.tok([prompt], return_tensors="pt", add_special_tokens=False).to(next(bot.model.parameters()).device)
+    start = enc["input_ids"].shape[1]
+
+    class RepeatStop(StoppingCriteria):
+        """Stop when the last 12 tokens already appeared earlier in the answer (the start of a loop)."""
+        fired = False
+
+        def __call__(self, input_ids, scores, **kw):
+            gen = input_ids[0, start:].tolist()
+            n = 12
+            if len(gen) >= 2 * n:
+                tail = gen[-n:]
+                if any(gen[i:i + n] == tail for i in range(len(gen) - 2 * n + 1)):
+                    RepeatStop.fired = True
+            return torch.tensor([RepeatStop.fired], device=input_ids.device)
+
+    streamer = TextIteratorStreamer(bot.tok, skip_prompt=True, skip_special_tokens=True)
+    stop_ids = [bot.tok.convert_tokens_to_ids("<|im_end|>"), bot.tok.convert_tokens_to_ids("<|endoftext|>")]
+    kw = dict(max_new_tokens=max_new_tokens, streamer=streamer, eos_token_id=stop_ids, pad_token_id=bot.tok.pad_token_id,
+              repetition_penalty=1.05, do_sample=False, stopping_criteria=StoppingCriteriaList([RepeatStop()]))
+    threading.Thread(target=bot.model.generate, kwargs={**enc, **kw}, daemon=True).start()
+    return streamer, rows, sim, RepeatStop
+
+
+def trim_repeats(text):
+    """Cut an answer where it starts repeating a sentence it already wrote."""
+    seen = set()
+    for m in re.finditer(r"[^.!?\n]+[.!?]?", text):
+        sentence = m.group().strip()
+        if len(sentence) > 25:
+            if sentence in seen:
+                return text[:m.start()].rstrip()
+            seen.add(sentence)
+    return text
+
+
 def to_pairs(history):
     """Gradio message list -> [(user, assistant), ...]"""
     pairs, user = [], None
@@ -77,13 +122,16 @@ def build_demo(bot, card=None):
         if not message.strip():
             yield history, gr.update(), ""
             return
-        streamer, rows, sim = bot.respond(message, to_pairs(history), use_library, stream=True)
+        streamer, rows, sim, stopper = stream_answer(bot, message, use_library)
         history = history + [{"role": "user", "content": message}, {"role": "assistant", "content": ""}]
         src = sources_md(rows, sim, bot.min_sim) if use_library else "_The library was switched off._"
         text = ""
         for piece in streamer:
             text += piece
             history[-1]["content"] = text
+            yield history, src, ""
+        if stopper.fired:                   # the model began to loop: keep the answer up to the first repeat
+            history[-1]["content"] = text = trim_repeats(text)
             yield history, src, ""
         if itbot.is_refusal(text):          # a declined question: the closest threads are not real sources
             yield history, OFF_TOPIC, ""
